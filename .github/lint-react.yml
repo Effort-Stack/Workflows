@@ -1,0 +1,55 @@
+name: Automatizar Formateo de archivos con ESLint y Prettier
+on: [push]  # El workflow se activa en cada push a cualquier rama del repositorio.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest  # Se ejecuta en la última versión de Ubuntu.
+
+    steps:
+    - name: "Checkout repositorio"
+      uses: actions/checkout@v3  # Obtiene el código fuente del repositorio.
+
+    - name: "Configurar Node"
+      uses: actions/setup-node@v3  # Configura Node.js, especifica la versión si es necesario en 'node-version'.
+
+    - name: "Caché de node_modules"
+      uses: actions/cache@v3
+      with:
+        path: |
+          **/node_modules
+          */*/node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/yarn.lock', '**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: "Instalar dependencias"
+      run: npm install  # Instala las dependencias del proyecto.
+
+    - name: "Arreglar archivos con ESLint"
+      run: npx eslint . --fix  # Ejecuta ESLint para corregir automáticamente los problemas encontrados.
+
+    - name: "Arreglar archivos con Prettier"
+      run: npx prettier --write .  # Ejecuta Prettier para formatear el código.
+
+    - name: "Comprobar cambios"
+      id: check_changes
+      run: |
+        if git diff --quiet; then
+          echo "No hay cambios para cometer."
+          echo "::set-output name=changes::false"
+        else
+          echo "Hay cambios para cometer."
+          echo "::set-output name=changes::true"
+        fi
+
+    - name: "Commit cambios"
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Auto-fix linting and formatting issues"
+        branch: ${{ github.head_ref }}
+        commit_options: '--signoff'
+        commit_user_name: JHDEZ1108
+        commit_user_email: 42848537+JHDEZ1108@users.noreply.github.com
+        commit_author: JHDEZ1108 <42848537+JHDEZ1108@users.noreply.github.com>
+      # Realiza un commit con los cambios de ESLint y Prettier si los hay.
