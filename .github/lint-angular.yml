@@ -1,0 +1,62 @@
+name: Automatizar Formateo de archivos con Lint
+run-name: Lint automático
+on: [push]  # El workflow se activa en cada push a cualquier rama del repositorio.
+
+env:
+  ANGULAR_CLI_VERSION: 'x.y.z'  # Reemplaza 'x.y.z' con la versión deseada de Angular CLI.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest  # Se ejecuta en la última versión de Ubuntu.
+
+    steps:
+    - name: "Checkout repositorio"
+      uses: actions/checkout@v3  # Obtiene el código fuente del repositorio.
+
+    - name: "Configurar Node 18"
+      uses: actions/setup-node@v3  # Configura Node.js versión 18.
+
+    - name: "Caché de node_modules"
+      uses: actions/cache@v3
+      with:
+        path: |
+          **/node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: "Instalar CLI de Angular"
+      run: npm install -g @angular/cli@$ANGULAR_CLI_VERSION
+      # Instala una versión específica de Angular CLI globalmente.
+
+    - name: "Instalar dependencias"
+      run: |
+        npm install --ignore-scripts  # Instala las dependencias del proyecto sin ejecutar scripts.
+        cd frontend
+        npm install --ignore-scripts --legacy-peer-deps  # Instala dependencias para 'frontend'.
+
+    - name: "Arreglar archivos lint"
+      run: 'npm run lint:fix'  # Ejecuta el script de npm para corregir problemas de formateo.
+
+    - name: "Comprobar cambios"
+      id: check_changes
+      run: |
+        if git diff --quiet; then
+          echo "No hay cambios para cometer."
+          echo "::set-output name=changes::false"
+        else
+          echo "Hay cambios para cometer."
+          echo "::set-output name=changes::true"
+        fi
+
+    - name: "Commit cambios"
+      if: steps.check_changes.outputs.changes == 'true'
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Auto-fix linting issues"
+        branch: ${{ github.head_ref }}
+        commit_options: '--signoff'
+        commit_user_name: JHDEZ1108
+        commit_user_email: 42848537+JHDEZ1108@users.noreply.github.com
+        commit_author: JHDEZ1108 <42848537+JHDEZ1108@users.noreply.github.com>
+      # Realiza un commit con los cambios de formateo si los hay.
