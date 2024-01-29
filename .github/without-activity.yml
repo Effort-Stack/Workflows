@@ -1,0 +1,26 @@
+name: 'Cerrar Issues y PRs sin actividad'
+
+on:
+  schedule:
+    - cron: '30 1 * * *'  # El trabajo se ejecuta a la 1:30 AM UTC todos los días.
+
+jobs:
+  sin-actividad:
+    runs-on: ubuntu-latest  # El trabajo se ejecuta en la última versión de Ubuntu.
+
+    steps:
+      # 'actions/stale@v7' es una acción que marca y cierra issues y PRs que no han tenido actividad.
+      - uses: actions/stale@v7
+        with:
+          days-before-stale: 60  # Número de días de inactividad antes de que un issue/PR se marque como obsoleto.
+          days-before-close: 7   # Número de días después de marcado como obsoleto para cerrar el issue/PR.
+          stale-issue-message: 'Este Issue no tiene actividad desde hace más de 60 días, será marcado como obsoleto y si no tiene actividad en los próximos 7 días, se cerrará.'
+          stale-pr-message: 'Este Pull Request no tiene actividad desde hace más de 60 días, será marcado como obsoleto y si no tiene actividad en los próximos 7 días, se cerrará.'
+          stale-issue-label: 'sin-actividad'  # Etiqueta para issues obsoletos.
+          stale-pr-label: 'sin-actividad'     # Etiqueta para PRs obsoletos.
+          exempt-issue-labels: 'no-cerrar'    # Etiquetas que, si están presentes, el issue no se marcará como obsoleto.
+          exempt-pr-labels: 'no-cerrar'       # Etiquetas que, si están presentes, el PR no se marcará como obsoleto.
+          only-labels: ''                     # Solo issues/PRs con estas etiquetas serán considerados para marcar como obsoletos.
+          operations-per-run: 30              # Limita el número de operaciones por ejecución para evitar exceder las cuotas de la API.
+          remove-stale-when-updated: true     # Elimina la etiqueta de obsoleto si el issue/PR es actualizado.
+          debug-only: false                   # Si se establece en true, no se realizarán operaciones de cierre reales, solo se simularán.
