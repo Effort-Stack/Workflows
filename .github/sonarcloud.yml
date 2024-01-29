@@ -1,0 +1,25 @@
+name: SonarCloud
+run-name: SonarCloud
+on:
+  push:
+    branches:
+      - main  # Ejecuta el workflow solo cuando se hace push a la rama 'main'.
+  pull_request:
+    types: [opened, synchronize, reopened]  # También se activa con PRs cuando se abren, sincronizan o reabren.
+
+jobs:
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest  # Se ejecuta en la última versión de Ubuntu.
+
+    steps:
+      - name: "Checkout repositorio"
+        uses: actions/checkout@v3  # Obtiene el código fuente del repositorio usando la acción 'checkout' versión 3.
+        with:
+          fetch-depth: 0  # Obtiene todo el historial para análisis detallado, necesario para ciertas métricas en SonarCloud.
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master  # Usa la acción de SonarCloud para escanear el código.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Token de GitHub para la integración con SonarCloud.
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Token de SonarCloud para la autenticación y ejecución del análisis.
