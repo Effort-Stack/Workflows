@@ -1,0 +1,84 @@
+name: "Flujo CD" # Nombre del flujo de implementación continua (CD)
+run-name: "Flujo CD" # Nombre de la ejecución del flujo CD
+on:
+  workflow_dispatch: # Desencadenador para iniciar el flujo de trabajo manualmente
+    inputs:
+      cloud:
+        description: "Proveedor Cloud" # Descripción del input
+        required: true # Indica que este input es obligatorio
+        default: "AWS" # Valor por defecto del input
+        options: ["AWS", "GCP", "Azure"] # Opciones válidas para el input
+
+jobs:
+  aws: # Trabajo para implementar en AWS
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud == 'AWS' # Condición para ejecutar este trabajo si el proveedor de la nube es AWS
+    steps:
+      - name: "Configurar credenciales de AWS" # Configura las credenciales de AWS para autenticación
+        uses: aws-actions/configure-aws-credentials@e1e17a757e536f70e52b5a12b2e8d1d1c60e04ef #v2 #v2.0.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Crear archivo de configuración para AppRunner # Crea un archivo JSON de configuración para AWS AppRunner
+        run:  |
+          echo '{
+            "ServiceArn": "${{ vars.AWS_APPRUNNER_ARN}}",
+            "SourceConfiguration": {
+                "ImageRepository": {
+                    "ImageIdentifier": "${{ vars.AWS_REGISTRY }}/${{ vars.AWS_REGISTRY_ALIAS }}/${{ vars.AWS_REPOSITORY }}:latest",
+                    "ImageRepositoryType": "ECR_PUBLIC"
+                }
+            }
+          }' > apprunner.json
+      - name: Actualizar app en AWS App Runner # Actualiza la aplicación en AWS App Runner usando el archivo de configuración
+        run: |
+          aws apprunner update-service \
+            --cli-input-json file://apprunner.json
+
+  gcp: # Trabajo para implementar en Google Cloud Platform (GCP)
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud == 'GCP' # Condición para ejecutar este trabajo si el proveedor de la nube es GCP
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      SERVICE_NAME: ${{ vars.GCP_SERVICE_NAME }}
+      REGION: ${{ vars.GCP_REGION }}
+    steps:
+      - name: "Autenticar en GCP" # Autentica en GCP usando un token de acceso
+        id: auth
+        uses: google-github-actions/auth@ef5d53e30bbcd8d0836f4288f5e50ff3e086997d #v1.0.0
+        with:
+          token_format: access_token
+          workload_identity_provider: ${{ env.PROJECT_ID }}
+          service_account: ${{ secrets.GCP_SA_KEY }}
+      - name: "Autenticar en Artifact Registry" # Autentica en Google Artifact Registry para obtener acceso a las imágenes
+        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a #v2 #v2.1.0
+        with:
+          registry: ${{ vars.GCP.REGISTRY}}
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+      - name: "Desplegar en Cloud Run" # Implementa la aplicación en Google Cloud Run
+        uses: google-github-actions/deploy-cloudrun@9c01af28be5da14b228ba369b7700d22830b35b7 #v1.0.1
+        with:
+          image: ${{ vars.GCP_REGION }}-${{ vars.GCP.REGISTRY}}/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_REPOSITORY_NAME }}/${{ vars.GCP_IMAGE_NAME }}:latest
+          region: ${{ env.REGION }}
+          service: ${{ env.SERVICE_NAME }}
+
+  azure: # Trabajo para implementar en Microsoft Azure
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud == 'Azure' # Condición para ejecutar este trabajo si el proveedor de la nube es Azure
+    steps:
+      - name: "Autenticar en Azure" # Autentica en Azure usando credenciales de servicio
+        uses: azure/login@92a5484dfaf04ca78a94597f4f19fea633851fa2 #v1 #v1.4.6
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: "Crear Azure Container Instance" # Crea una instancia de contenedor en Azure
+        uses: Azure/aci-deploy@28cafb864979bc5b44cd1f3fd45522727eb5a3db #v1 #v1.1.3
+        with:
+          resource-group: ${{ vars.AZURE_RESOURCE_NAME }}
+          name: ${{ VARS.AZURE_CONTAINER_INSTANCE_NAME}}
+          dns-name-label: ${{ vars.AZURE_DNS }}
+          image: ${{ vars.AZURE_REGISTRY_NAME }}/${{ vars.AZURE_IMAGE_NAME }}:latest
+          registry-username: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+          registry-password: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+          location: ${{ vars.AZURE_REGION }}
