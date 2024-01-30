@@ -1,0 +1,154 @@
+name: "Flujo CI-Build" # Nombre del flujo de trabajo
+run-name: "Flujo CI - Build"
+
+on: # Define los eventos que dispararán el flujo de trabajo
+  workflow_dispatch: # Permite la ejecución manual del flujo de trabajo desde GitHub UI con opciones
+    inputs:
+      cloud: # Input para seleccionar el proveedor de servicios en la nube
+        description: "Proveedor Cloud"
+        required: true
+        default: "AWS"
+        options: ["AWS", "GCP", "Azure"]
+  issue_comment: # Se activa cuando se añade un comentario en un issue
+    types: [created]
+
+jobs: # Los trabajos a ejecutar
+  docker-aws: # Job para construir y subir imágenes Docker a AWS
+    if: | # Condición para ejecutar este trabajo, basado en comentarios en pull requests o selección manual
+      (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-AWS')) ||
+      github.event.inputs.cloud == 'AWS'
+    runs-on: ubuntu-latest # Define el tipo de máquina virtual a usar
+    steps: # Pasos a ejecutar en este trabajo
+      - name: "Checkout repositorio"
+        uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f # Acción para clonar el repositorio del código
+      - name: "Configurar QEMU" # Paso para configurar QEMU, un emulador de hardware
+        uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18
+      - name: "Configurar Docker Buildx" # Paso para configurar Docker Buildx, una extensión de Docker para soporte multiplataforma
+        uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c
+      - name: "Configurar tag y etiquetas para ${{ github.ref }}" # Define etiquetas para la imagen Docker basadas en la referencia de Git
+        run: |
+          if [ "$GITHUB_REF" == "refs/heads/master" ]; then
+            echo "DOCKER_TAG=latest" >> $GITHUB_ENV
+          else
+            echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
+          fi
+          echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
+          echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
+      - name: "Configurar credenciales de AWS" # Configura las credenciales de AWS para autenticación
+        uses: aws-actions/configure-aws-credentials@e1e17a757e536f70e52b5a12b2e8d1d1c60e04ef
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: "Autenticar en AWS ECR" # Autenticación en Amazon Elastic Container Registry (ECR)
+        id: login-ecr-publico
+        uses: aws-actions/amazon-ecr-login@261a7de32bda11ba01f4d75c4ed6caf3739e54be
+        with:
+          registry-type: public
+      - name: "Compilar y Subir imagen de Docker" # Paso para construir y subir la imagen Docker a AWS ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr-publico.outputs.registry }}
+        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ vars.AWS_REGISTRY_ALIAS }}/${{ vars.AWS_REPOSITORY }}:${{ env.DOCKER_TAG }}
+          build-args: |
+            VCS_REF=${{ env.VCS_REF }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            
+    docker-gcp: # Job para construir y subir imágenes Docker a Google Cloud Platform (GCP)
+      if: | # Condición para ejecutar este trabajo, basado en comentarios en pull requests o selección manual
+        (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-GCP')) ||
+        github.event.inputs.cloud == 'GCP'
+      runs-on: ubuntu-latest
+      env:
+        PROJECT_ID: ${{ vars.GCP_PROJECT_ID }} # Define el ID del proyecto de GCP como una variable de entorno
+      steps:
+        - name: "Checkout repositorio"
+          uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f
+        - name: "Configurar QEMU" # Configura QEMU para la emulación de hardware
+          uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18
+        - name: "Configurar Docker Buildx" # Configura Docker Buildx para la construcción de imágenes multiplataforma
+          uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c
+        - name: "Configurar tag y etiquetas para ${{ github.ref }}" # Configura etiquetas y tags para la imagen basadas en la rama de Git
+          run: |
+            if [ "$GITHUB_REF" == "refs/heads/master" ]; then
+              echo "DOCKER_TAG=latest" >> $GITHUB_ENV
+            else
+              echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
+            fi
+            echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
+            echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
+        - name: "Autenticar en GCP" # Autentica en GCP usando un token de acceso
+          id: auth
+          uses: google-github-actions/auth@ef5d53e30bbcd8d0836f4288f5e50ff3e086997d
+          with:
+            token_format: access_token
+            workload_identity_provider: ${{ env.PROJECT_ID }}
+            service_account: ${{ secrets.GCP_SA_KEY }}
+        - name: "Autenticar en Artifact Registry" # Autentica en Google Artifact Registry para subir la imagen
+          uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+          with:
+            registry: ${{ vars.GCP.REGISTRY}}
+            username: oauth2accesstoken
+            password: ${{ steps.auth.outputs.access_token }}
+        - name: "Compilar y Subir imagen de Docker" # Construye y sube la imagen Docker a Google Artifact Registry
+          uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+          with:
+            context: .
+            file: ./Dockerfile
+            platforms: linux/amd64,linux/arm64
+            push: true
+            tags: |
+              ${{ vars.GCP_REGION }}-${{ vars.GCP.REGISTRY}}/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_REPOSITORY_NAME }}/${{ vars.GCP_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+            build-args: |
+              VCS_REF=${{ env.VCS_REF }}
+              BUILD_DATE=${{ env.BUILD_DATE }}
+  
+    docker-azure: # Job para construir y subir imágenes Docker a Azure
+      if: | # Condición para ejecutar este trabajo, basado en comentarios en pull requests o selección manual
+        (github.event.issue.pull_request && contains(github.event.comment.body, 'Build-Azure')) ||
+        github.event.inputs.cloud == 'Azure'
+      runs-on: ubuntu-latest
+      steps:
+        - name: "Checkout repositorio"
+          uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f
+        - name: "Configurar QEMU" # Configura QEMU para la emulación de hardware
+          uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18
+        - name: "Configurar Docker Buildx" # Configura Docker Buildx para la construcción de imágenes multiplataforma
+          uses: docker/setup-buildx-action@4b4e9c3e2d4531116a6f8ba8e71fc6e2cb6e6c8c
+        - name: "Configurar tag y etiquetas para ${{ github.ref }}" # Configura etiquetas y tags para la imagen basadas en la rama de Git
+          run: |
+            if [ "$GITHUB_REF" == "refs/heads/master" ]; then
+              echo "DOCKER_TAG=latest" >> $GITHUB_ENV
+            else
+              echo "DOCKER_TAG=snapshot" >> $GITHUB_ENV
+            fi
+            echo "VCS_REF=`git rev-parse --short HEAD`" >> $GITHUB_ENV
+            echo "BUILD_DATE=`date -u +”%Y-%m-%dT%H:%M:%SZ”`" >> $GITHUB_ENV
+        - name: "Autenticar en Azure" # Autentica en Azure usando credenciales de servicio
+          uses: azure/login@92a5484dfaf04ca78a94597f4f19fea633851fa2
+          with:
+            creds: ${{ env.AZURE_CREDENTIALS }}
+        - name: "Autenticar en Azure Container Registry" # Autentica en Azure Container Registry para subir la imagen
+          uses: azure/docker-login@83efeb77770c98b620c73055fbb59b2847e17dc0
+          with:
+            login-server: ${{ vars.AZURE_REGISTRY_NAME }}
+            username: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+            password: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+        - name: "Compilar y Subir imagen de Docker" # Construye y sube la imagen Docker a Azure Container Registry
+          uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+          with:
+            context: .
+            file: ./Dockerfile
+            platforms: linux/amd64,linux/arm64
+            push: true
+            tags: |
+              ${{ vars.AZURE_REGISTRY_NAME }}/${{ vars.AZURE_IMAGE_NAME }}:${{ env.DOCKER_TAG }}
+            build-args: |
+              VCS_REF=${{ env.VCS_REF }}
+              BUILD_DATE=${{ env.BUILD_DATE }}
